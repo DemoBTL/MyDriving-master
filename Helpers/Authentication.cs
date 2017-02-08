@@ -2,38 +2,56 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System;
-using System.Threading.Tasks;
-using Foundation;
-using MyDriving.Utils;
-using Microsoft.WindowsAzure.MobileServices;
-using MyDriving.Utils.Interfaces;
+using System.Net.Http;
 using System.Threading;
-namespace MyDriving.iOS.Helpers
+using System.Threading.Tasks;
+using Microsoft.WindowsAzure.MobileServices;
+using MyDriving.Utils;
+using MyDriving.Utils.Interfaces;
+using Windows.UI.Core;
+
+namespace MyDriving.UWP.Helpers
 {
     public class Authentication : IAuthentication
     {
-        public async Task<MobileServiceUser> LoginAsync(IMobileServiceClient client, MobileServiceAuthenticationProvider provider)
+        public void ClearCookies()
         {
+        }
+
+        public async Task<MobileServiceUser> LoginAsync(IMobileServiceClient client,
+            MobileServiceAuthenticationProvider provider)
+        {
+            var coreWindow = Windows.ApplicationModel.Core.CoreApplication.MainView;
+            // Dispatcher needed to run on UI Thread
+            var dispatcher = coreWindow.CoreWindow.Dispatcher;
+
             MobileServiceUser user = null;
+
 
             try
             {
-                var window = UIKit.UIApplication.SharedApplication.KeyWindow;
-                var current = window.RootViewController;
-                while (current.PresentedViewController != null)
+                if (dispatcher.HasThreadAccess)  //is running on UI thread
                 {
-                    current = current.PresentedViewController;
+                    user = await client.LoginAsync(provider);
+                }
+                else
+                {
+                    await dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
+                    {
+                        user = await client.LoginAsync(provider);
+
+                    });
                 }
 
-                Settings.Current.LoginAttempts++;
+                if (user != null)
+                {
+                    Settings.Current.AuthToken = user?.MobileServiceAuthenticationToken ?? string.Empty;
+                    Settings.Current.AzureMobileUserId = user?.UserId ?? string.Empty;
+                }
 
-                user = await client.LoginAsync(current, provider);
-                Settings.Current.AuthToken = user?.MobileServiceAuthenticationToken ?? string.Empty;
-                Settings.Current.AzureMobileUserId = user?.UserId ?? string.Empty;
             }
             catch (Exception e)
             {
-                //Don't log if the user cancelled out of the login screen
                 if (!e.Message.Contains("cancelled"))
                 {
                     e.Data["method"] = "LoginAsync";
@@ -44,15 +62,5 @@ namespace MyDriving.iOS.Helpers
             return user;
         }
 
-        public void ClearCookies()
-        {
-            var store = NSHttpCookieStorage.SharedStorage;
-            var cookies = store.Cookies;
-
-            foreach (var c in cookies)
-            {
-                store.DeleteCookie(c);
-            }
-        }
     }
 }
